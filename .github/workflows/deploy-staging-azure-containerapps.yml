@@ -1,0 +1,80 @@
+name: dpos-deploy-staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  TAG: ${{ github.sha }}
+  PORT: "4001"
+  WEB_PORT: "3000"
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail fast on missing secrets
+        shell: bash
+        run: |
+          source .github/workflows/_lib_failfast.sh
+          require_env AZURE_CREDENTIALS
+          require_env AZURE_SUBSCRIPTION_ID
+          require_env AZURE_RESOURCE_GROUP
+          require_env AZURE_LOCATION
+          require_env AZURE_CONTAINERAPPS_ENV
+          require_env AZURE_API_APP_NAME
+          require_env AZURE_WORKER_APP_NAME
+          require_env AZURE_WEB_APP_NAME
+          # Optional but recommended:
+          # require_env STAGING_API_URL
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set subscription
+        run: az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Ensure Container Apps extension
+        run: az extension add --name containerapp --upgrade
+
+      - name: Deploy API Container App
+        run: |
+          API_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ env.TAG }}"
+          az containerapp update             --name "${{ secrets.AZURE_API_APP_NAME }}"             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"             --image "$API_IMAGE"             --set-env-vars               PORT=${{ env.PORT }}               DPOS_ENV=staging               INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY_STAGING }}               DATABASE_URL=${{ secrets.DATABASE_URL_STAGING }}             --query properties.provisioningState -o tsv
+
+      - name: Deploy WORKER Container App
+        run: |
+          WORKER_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ env.TAG }}"
+          az containerapp update             --name "${{ secrets.AZURE_WORKER_APP_NAME }}"             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"             --image "$WORKER_IMAGE"             --set-env-vars               DPOS_ENV=staging               DPOS_BASE_URL=${{ secrets.STAGING_API_INTERNAL_URL }}               INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY_STAGING }}               DPOS_TRAFFIC=system             --query properties.provisioningState -o tsv
+
+      - name: Deploy WEB Container App
+        run: |
+          WEB_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-web:${{ env.TAG }}"
+          az containerapp update             --name "${{ secrets.AZURE_WEB_APP_NAME }}"             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}"             --image "$WEB_IMAGE"             --set-env-vars               NODE_ENV=production               PORT=${{ env.WEB_PORT }}               NEXT_PUBLIC_API_BASE=${{ secrets.STAGING_API_PUBLIC_URL }}             --query properties.provisioningState -o tsv
+
+      - name: Post-deploy smoke (public API)
+        shell: bash
+        run: |
+          source .github/workflows/_lib_failfast.sh
+          require_env STAGING_API_PUBLIC_URL
+          BASE="${{ secrets.STAGING_API_PUBLIC_URL }}"
+          echo "Checking: $BASE/healthz"
+          for i in {1..60}; do
+            if curl -fsS "$BASE/healthz" >/dev/null; then
+              echo "API healthy"
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS "$BASE/metrics" | head -n 5

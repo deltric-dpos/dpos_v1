@@ -1,0 +1,53 @@
+name: dpos-ci-smoke
+
+on:
+  pull_request:
+  push:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env templates (non-secret)
+        run: |
+          cp .env.backend.example .env.backend
+          cp .env.worker.example .env.worker
+          cp .env.frontend.example .env.frontend
+
+      - name: Inject INTERNAL_API_KEY for internal checks (dev)
+        run: |
+          echo "INTERNAL_API_KEY=ci-dev-key" >> .env.backend
+          echo "INTERNAL_API_KEY=ci-dev-key" >> .env.worker
+
+      - name: Build + up
+        run: docker compose up -d --build
+
+      - name: Wait for API health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4001/healthz >/dev/null; then
+              echo "API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy"
+          docker compose logs api
+          exit 1
+
+      - name: Smoke (/healthz + /metrics)
+        run: node ./scripts/smoke.js
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Down
+        if: always()
+        run: docker compose down

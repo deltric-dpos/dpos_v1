@@ -1,0 +1,72 @@
+name: dpos-build-push
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        run: |
+          SHA_TAG=${GITHUB_SHA::7}
+          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
+          # If this is a tag push, use it. Else 'latest' for main/master.
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "release_tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "release_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build & Push API
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.sha_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ steps.meta.outputs.release_tag }}
+
+      - name: Build & Push Worker
+        uses: docker/build-push-action@v6
+        with:
+          context: ./worker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ steps.meta.outputs.sha_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ steps.meta.outputs.release_tag }}
+
+      - name: Build & Push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-web:${{ steps.meta.outputs.sha_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-web:${{ steps.meta.outputs.release_tag }}

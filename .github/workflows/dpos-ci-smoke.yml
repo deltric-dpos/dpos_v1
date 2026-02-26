@@ -1,0 +1,53 @@
+name: dpos-ci-smoke
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke prerequisites
+        run: |
+          docker version
+          docker compose version
+
+      - name: Compose up (build)
+        run: |
+          if [ ! -f docker-compose.yml ] && [ ! -f docker-compose.yaml ]; then
+            echo "ERROR: docker-compose.yml not found in repo root."
+            exit 1
+          fi
+          docker compose up -d --build
+
+      - name: Wait for API health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:4001/healthz >/dev/null; then
+              echo "API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy"
+          docker compose logs api || true
+          exit 1
+
+      - name: Smoke (/healthz + /metrics)
+        run: node ./scripts/smoke.js
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs || true
+
+      - name: Down
+        if: always()
+        run: docker compose down || true

@@ -1,0 +1,56 @@
+name: dpos-build-push-acr
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR login
+        run: az acr login --name "${{ secrets.AZURE_ACR_NAME }}"
+
+      - name: Compute tag
+        id: tag
+        run: echo "sha7=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push API
+        run: |
+          ACR="${{ secrets.AZURE_ACR_NAME }}.azurecr.io"
+          TAG="${{ steps.tag.outputs.sha7 }}"
+          test -f ./backend/Dockerfile || (echo "ERROR: backend/Dockerfile missing" && exit 1)
+          docker build -t "$ACR/dpos-api:$TAG" ./backend
+          docker push "$ACR/dpos-api:$TAG"
+
+      - name: Build & Push Worker
+        run: |
+          ACR="${{ secrets.AZURE_ACR_NAME }}.azurecr.io"
+          TAG="${{ steps.tag.outputs.sha7 }}"
+          test -f ./worker/Dockerfile || (echo "ERROR: worker/Dockerfile missing" && exit 1)
+          docker build -t "$ACR/dpos-worker:$TAG" ./worker
+          docker push "$ACR/dpos-worker:$TAG"
+
+      - name: Build & Push Web
+        run: |
+          ACR="${{ secrets.AZURE_ACR_NAME }}.azurecr.io"
+          TAG="${{ steps.tag.outputs.sha7 }}"
+          test -f ./frontend/Dockerfile || (echo "ERROR: frontend/Dockerfile missing" && exit 1)
+          docker build -t "$ACR/dpos-web:$TAG" ./frontend
+          docker push "$ACR/dpos-web:$TAG"
