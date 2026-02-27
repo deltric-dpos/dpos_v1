@@ -2,7 +2,8 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
+RUN npm prune --omit=dev
 
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -12,3 +13,4 @@ COPY . .
 EXPOSE 4001
 # Prefer npm start if defined; fallback to node server.js
 CMD ["sh","-lc","(npm run -s start 2>/dev/null) || node server.js"]
+
