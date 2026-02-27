@@ -1,0 +1,22 @@
+{
+  "name": "deltric-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "verify": "node verify/run_checks.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "leaflet": "1.9.4",
+    "next": "^13.5.11",
+    "node-fetch": "2.6.7",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-leaflet": "4.2.1",
+    "recharts": "^3.4.1",
+    "ws": "^8.19.0"
+  }
+}
