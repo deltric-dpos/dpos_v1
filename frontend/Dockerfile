@@ -1,40 +1,27 @@
-# syntax=docker/dockerfile:1
-# D-POS Frontend Dockerfile (Node)
-# - Build stage installs full deps and runs build if present
-# - Runtime stage installs prod deps only (or keeps runtime minimal if app is static)
-FROM node:20-bookworm-slim AS build
-WORKDIR /app
+# D-POS Frontend Dockerfile (generic Node runtime)
+# Build context MUST be the frontend folder (./frontend)
 
-ENV NODE_ENV=development
-ENV NPM_CONFIG_LOGLEVEL=warn
-ENV NPM_CONFIG_FUND=false
-ENV NPM_CONFIG_AUDIT=false
-ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
-ENV NPM_CONFIG_ENGINE_STRICT=false
-
-COPY package*.json ./
-RUN npm --version && node --version && npm install
-COPY . .
-
-# If your frontend has a build script, this will run it.
-# If not, it will no-op and continue.
-RUN (npm run | grep -q " build" && npm run build) || echo "No build script detected; skipping build."
-
-FROM node:20-bookworm-slim AS runner
-WORKDIR /app
+FROM node:20-alpine
 
 ENV NODE_ENV=production
-ENV NPM_CONFIG_LOGLEVEL=warn
-ENV NPM_CONFIG_FUND=false
-ENV NPM_CONFIG_AUDIT=false
-ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
-ENV NPM_CONFIG_ENGINE_STRICT=false
+WORKDIR /app
 
-COPY package*.json ./
-RUN npm --version && node --version && npm install --omit=dev
+COPY package.json ./package.json
+COPY package-lock.json ./package-lock.json
 
-# Copy source + common build outputs (if they exist)
+RUN echo "== Frontend /app listing after manifest copy =="  && ls -la /app  && test -f /app/package.json
+
+RUN npm ci --no-audit --no-fund
+
 COPY . .
-# If the build produced assets (Vite/CRA/Next/etc.), they remain in the image.
+
+# Build if your project supports it (most do). If your frontend is purely static,
+# keep build; if it's Next.js, build will create .next; if it's Vite/React, build creates dist.
+RUN npm run build
+
+# Start:
+# - Next.js usually: npm run start (port 3000)
+# - Vite preview: npm run preview (port 4173)
+# If your repo uses a different start command, update CMD.
 EXPOSE 3000
-CMD ["npm","run","start"]
+CMD ["npm", "run", "start"]

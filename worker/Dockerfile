@@ -1,28 +1,27 @@
-# syntax=docker/dockerfile:1
-# D-POS Worker Dockerfile (tolerant + CI-friendly)
-#
-# Why this exists:
-# - Your GH Actions build was failing because the worker build context contained a package-lock.json
-#   but *no* package.json, causing `npm ci` to fail (ENOENT /app/package.json).
-# - This Dockerfile makes the build succeed while still installing deps when package.json exists.
+# D-POS Worker Dockerfile (fail-fast, CI-proof)
+# Build context MUST be the worker folder (./worker)
 
 FROM node:20-alpine
 
-WORKDIR /app
 ENV NODE_ENV=production
+WORKDIR /app
 
-# Copy the worker source first (some repos may be missing package.json in this folder)
+# Copy manifest(s) explicitly (no globs that can hide problems)
+COPY package.json ./package.json
+# lockfile is optional but preferred
+COPY package-lock.json ./package-lock.json
+
+# Fail fast with a clear message if manifest didn't arrive in the image
+RUN echo "== Worker /app listing after manifest copy =="  && ls -la /app  && test -f /app/package.json
+
+# Install deps (CI-friendly)
+RUN npm ci --omit=dev --no-audit --no-fund
+
+# Copy the rest of the worker source
 COPY . .
 
-# Install deps only if a package.json is present.
-# If npm ci fails (lock mismatch), fallback to npm install.
-RUN if [ -f package.json ]; then \
-      echo "[worker] package.json found -> installing dependencies"; \
-      npm ci --omit=dev || (echo "[worker] npm ci failed -> falling back to npm install" && npm install --omit=dev); \
-    else \
-      echo "[worker] WARNING: package.json not found in worker build context. Skipping npm install."; \
-      echo "[worker] If your worker needs dependencies, add worker/package.json (recommended) or adjust build context."; \
-    fi
+# Fail fast if entrypoint missing (adjust if your worker entry differs)
+RUN test -f /app/index.js -o -f /app/workerRunner.js -o -f /app/src/index.js || (echo "ERROR: worker entry file not found (expected index.js/workerRunner.js/src/index.js)" && ls -la /app && exit 1)
 
-# Start the worker (adjust entrypoint if your worker main file differs)
-CMD ["node", "workerRunner.js"]
+# Default command: try index.js; if you use workerRunner.js, change CMD accordingly
+CMD ["node", "index.js"]
